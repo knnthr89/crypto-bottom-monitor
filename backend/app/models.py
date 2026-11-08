@@ -20,3 +20,4 @@ class AssetSnapshot(BaseModel):
     as_of: str
     indicators: List[Indicator]
     caveats: List[str]
+    derivatives: Optional[Dict] = None
