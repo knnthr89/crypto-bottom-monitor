@@ -64,6 +64,23 @@ def build_snapshot(asset):
         derivatives, derivatives_reason = coinglass_derivatives_result(asset)
         if derivatives is None:
             caveats.append(derivatives_reason or "CoinGlass futures derivatives data unavailable.")
+        else:
+            # Add spot-price context so 24h liquidations are not interpreted in isolation.
+            if len(candles) >= 2:
+                previous_close = float(candles.close.iloc[-2])
+                derivatives["price_change_24h_pct"] = (
+                    (price / previous_close - 1) * 100 if previous_close else None
+                )
+            else:
+                derivatives["price_change_24h_pct"] = None
+
+            if len(candles) >= 31:
+                close_30d_ago = float(candles.close.iloc[-31])
+                derivatives["price_change_30d_pct"] = (
+                    (price / close_30d_ago - 1) * 100 if close_30d_ago else None
+                )
+            else:
+                derivatives["price_change_30d_pct"] = None
         result=score_features(Features(trends,vol,flows,cvd,ps))
         mode="live_partial"
     except Exception as e:
