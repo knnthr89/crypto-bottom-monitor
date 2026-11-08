@@ -27,7 +27,9 @@ data class Derivatives(
     val short_liquidations_24h_usd:Double?,
     val futures_volume_24h_usd:Double?,
     val oi_history_points:Int?,
-    val pairs_count:Int?
+    val pairs_count:Int?,
+    val price_change_24h_pct:Double?,
+    val price_change_30d_pct:Double?
 )
 data class Snapshot(
     val asset:String, val symbol:String, val price_usd:Double?, val score:Double?, val label:String,
@@ -136,15 +138,22 @@ private fun DerivativesPanel(d: Derivatives) {
         else -> "Liquidations fairly balanced"
     }
 
+    val price24h = d.price_change_24h_pct
+    val price30d = d.price_change_30d_pct
+
     val interpretation = when {
         liquidationTotal <= 0.0 && oiChange == null && funding == null ->
             "CoinGlass has not supplied enough data to interpret futures positioning."
+        shortValue > longValue * 1.5 && price24h != null && price24h < 0.0 ->
+            "More shorts were liquidated, but spot price still fell over the last 24 hours. This is not evidence of a bullish short squeeze; intraday rebounds or volatile position closures may explain the liquidations."
+        shortValue > longValue * 1.5 && price24h != null && price24h > 0.0 && price30d != null && price30d < 0.0 ->
+            "Short liquidations dominate and price rose over 24 hours, but the 30-day trend is still down. This may be a short squeeze or relief bounce, not a confirmed reversal."
+        shortValue > longValue * 1.5 && price24h != null && price24h > 0.0 && oiChange != null && oiChange < -1.0 ->
+            "Short liquidations dominate while price rose and open interest fell. This is consistent with a short squeeze, but it still needs spot buying and stronger price structure to confirm a reversal."
         longValue > shortValue * 1.5 && oiChange != null && oiChange < -1.0 ->
             "Long liquidations dominate while open interest is falling. Leveraged buyers may be getting flushed out. This can happen during capitulation, but is not proof of a bottom."
-        shortValue > longValue * 1.5 && oiChange != null && oiChange < -1.0 ->
-            "Short liquidations dominate, but open interest is also falling. Positions are being closed overall; this does not by itself confirm bullish momentum."
         shortValue > longValue * 1.5 ->
-            "More shorts than longs were liquidated. This can indicate a short squeeze, but check the spot-price direction and timing before calling it bullish."
+            "More shorts than longs were liquidated. Check the 24-hour and 30-day spot-price changes before interpreting this as bullish."
         longValue > shortValue * 1.5 ->
             "More longs than shorts were liquidated. This suggests greater stress among leveraged buyers; watch whether selling pressure begins to ease."
         else ->
@@ -162,9 +171,31 @@ private fun DerivativesPanel(d: Derivatives) {
 
         MetricLine(
             "Open interest",
-            d.open_interest_usd?.let { "$${"%,.0f".format(Locale.US, it)}" } ?: "N/A",
+            d.open_interest_usd?.let { "${"%,.0f".format(Locale.US, it)}" } ?: "N/A",
             "Value of outstanding futures contracts",
             "Market size"
+        )
+        MetricLine(
+            "Spot price change (24h)",
+            price24h?.let { "${"%+.2f".format(Locale.US, it)}%" } ?: "N/A",
+            "Actual spot-price direction over the same 24-hour period",
+            when {
+                price24h == null -> "No data"
+                price24h > 0.0 -> "Price rising"
+                price24h < 0.0 -> "Price falling"
+                else -> "Flat"
+            }
+        )
+        MetricLine(
+            "Spot price change (30d)",
+            price30d?.let { "${"%+.2f".format(Locale.US, it)}%" } ?: "N/A",
+            "Broader trend context; not an intraday signal",
+            when {
+                price30d == null -> "No data"
+                price30d > 0.0 -> "30d rising"
+                price30d < 0.0 -> "30d falling"
+                else -> "Flat"
+            }
         )
         MetricLine(
             "Open interest change (24h)",
