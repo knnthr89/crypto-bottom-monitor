@@ -4,7 +4,7 @@ from .models import AssetSnapshot, Indicator
 from .scoring import Features, score_features
 from .store import init, save_row
 from .validation import run_validation
-from .providers import binance_daily, google_trends_weekly, etf_flows_result, coinglass_spot_cvd_result
+from .providers import binance_daily, google_trends_weekly, etf_flows_result, coinglass_spot_cvd_result, coinglass_derivatives_result
 from .indicators import trends_score, volume_score, etf_score, cvd_score, price_structure_score
 
 app=FastAPI(title="Crypto Bottom Confirmation Monitor",version="0.2.0")
@@ -61,6 +61,9 @@ def build_snapshot(asset):
             caveats.append(etf_reason + ".")
         if trends is None:
             caveats.append("Google Trends unavailable or throttled; indicator excluded.")
+        derivatives, derivatives_reason = coinglass_derivatives_result(asset)
+        if derivatives is None:
+            caveats.append(derivatives_reason or "CoinGlass futures derivatives data unavailable.")
         result=score_features(Features(trends,vol,flows,cvd,ps))
         mode="live_partial"
     except Exception as e:
@@ -69,6 +72,7 @@ def build_snapshot(asset):
         trends=vol=flows=cvd=ps=None
         flow_label="Spot taker flow"
         flow_detail="Spot directional flow unavailable."
+        derivatives=None
         caveats.append(f"Provider error: {type(e).__name__}.")
         mode="unavailable"
 
@@ -88,7 +92,7 @@ def build_snapshot(asset):
           maximum=maxima[k],status="available" if v is not None else "missing",detail=details[k]))
     return AssetSnapshot(asset=asset,symbol=pair,price_usd=price,score=result["score"],label=result["label"],
       confirmed_bottom=result["confirmed_bottom"],data_mode=mode,as_of=datetime.now(timezone.utc).isoformat(),
-      indicators=indicators,caveats=caveats)
+      indicators=indicators,caveats=caveats,derivatives=derivatives if mode != "unavailable" else None)
 
 @app.get("/health")
 def health():
