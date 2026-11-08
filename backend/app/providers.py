@@ -196,3 +196,92 @@ def etf_flows_result(asset):
         return None, f"Only {len(flows)} complete ETF flow days available; at least 10 are required"
 
     return flows, None
+
+def coinglass_derivatives_result(asset):
+    """Aggregate Hobbyist-compatible CoinGlass futures OI and pairs-market metrics."""
+    key = os.getenv("COINGLASS_API_KEY")
+    if not key:
+        return None, "COINGLASS_API_KEY is not set"
+
+    headers = {"CG-API-KEY": key}
+    symbol = asset.upper()
+    base = "https://open-api-v4.coinglass.com"
+
+    def get_json(path, params):
+        response = requests.get(f"{base}{path}", params=params, headers=headers, timeout=20)
+        try:
+            payload = response.json()
+        except ValueError:
+            payload = {}
+        if response.status_code != 200:
+            raise RuntimeError(f"CoinGlass HTTP {response.status_code}")
+        if str(payload.get("code", "0")) not in ("0", "200"):
+            raise RuntimeError(f"CoinGlass API error: {str(payload.get('msg', 'unknown'))[:100]}")
+        return payload.get("data")
+
+    try:
+        oi_data = get_json(
+            "/api/futures/open-interest/aggregated-history",
+            {"symbol": symbol, "interval": "4h", "limit": 7, "unit": "usd"}
+        ) or []
+        pairs_data = get_json(
+            "/api/futures/pairs-markets",
+            {"symbol": symbol}
+        ) or []
+
+        # Sum exchange-level values for the requested coin.
+        oi_values = []
+        volume = long_liq = short_liq = 0.0
+        funding_weighted = funding_weight = 0.0
+        change_weighted = change_weight = 0.0
+        for row in pairs_data:
+            if not isinstance(row, dict):
+                continue
+            pair_symbol = str(row.get("symbol", "")).upper()
+            instrument = str(row.get("instrument_id", "")).upper()
+            if symbol not in pair_symbol and not instrument.startswith(symbol):
+                continue
+
+            oi = float(row.get("open_interest_usd") or 0)
+            volume += float(row.get("volume_usd") or 0)
+            long_liq += float(row.get("long_liquidation_usd_24h") or 0)
+            short_liq += float(row.get("short_liquidation_usd_24h") or 0)
+
+            funding = row.get("funding_rate")
+            if funding is not None and oi > 0:
+                funding_weighted += float(funding) * oi
+                funding_weight += oi
+
+            change = row.get("open_interest_change_percent_24h")
+            if change is not None and oi > 0:
+                change_weighted += float(change) * oi
+                change_weight += oi
+
+        closes = []
+        for point in oi_data:
+            if isinstance(point, dict) and point.get("close") is not None:
+                closes.append(float(point["close"]))
+
+        oi_change_history = None
+        if len(closes) >= 2 and closes[0] != 0:
+            oi_change_history = (closes[-1] / closes[0] - 1) * 100
+
+        result = {
+            "open_interest_usd": sum(float(row.get("open_interest_usd") or 0) for row in pairs_data
+                                     if isinstance(row, dict)
+                                     and (symbol in str(row.get("symbol", "")).upper()
+                                          or str(row.get("instrument_id", "")).upper().startswith(symbol))),
+            "open_interest_24h_change_pct": change_weighted / change_weight if change_weight else None,
+            "open_interest_4h_history_change_pct": oi_change_history,
+            "funding_rate": funding_weighted / funding_weight if funding_weight else None,
+            "long_liquidations_24h_usd": long_liq,
+            "short_liquidations_24h_usd": short_liq,
+            "futures_volume_24h_usd": volume,
+            "oi_history_points": len(closes),
+            "pairs_count": len(pairs_data)
+        }
+        if not result["open_interest_usd"] and not closes:
+            return None, f"CoinGlass returned no usable futures data for {symbol}"
+        return result, None
+    except (requests.RequestException, ValueError, TypeError, RuntimeError) as exc:
+        return None, f"CoinGlass derivatives unavailable: {str(exc)[:140]}"
