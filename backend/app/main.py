@@ -4,7 +4,7 @@ from .models import AssetSnapshot, Indicator
 from .scoring import Features, score_features
 from .store import init, save_row
 from .validation import run_validation
-from .providers import binance_daily, google_trends_weekly, etf_flows_from_csv, coinglass_spot_cvd_result
+from .providers import binance_daily, google_trends_weekly, etf_flows_result, coinglass_spot_cvd_result
 from .indicators import trends_score, volume_score, etf_score, cvd_score, price_structure_score
 
 app=FastAPI(title="Crypto Bottom Confirmation Monitor",version="0.2.0")
@@ -49,9 +49,16 @@ def build_snapshot(asset):
             caveats.append("CoinGlass spot CVD unavailable; using Binance spot taker-buy/sell volume as a directional proxy, not true aggregated CVD.")
 
         trends=trends_score(google_trends_weekly(name))
-        flows=etf_score(etf_flows_from_csv(asset))
+
+        raw_etf_flows, etf_reason = etf_flows_result(asset)
+        flows = etf_score(raw_etf_flows)
+
         if flows is None:
-            caveats.append("ETF flow feed not configured or unavailable for this asset; indicator excluded, not treated as zero.")
+            caveats.append(
+                f"ETF flow indicator unavailable: {etf_reason or 'insufficient data'}."
+            )
+        elif etf_reason:
+            caveats.append(etf_reason + ".")
         if trends is None:
             caveats.append("Google Trends unavailable or throttled; indicator excluded.")
         result=score_features(Features(trends,vol,flows,cvd,ps))
@@ -71,7 +78,7 @@ def build_snapshot(asset):
     details={
       "trends":"Weekly interest recovering from a low base; normalized 0–100 series.",
       "volume":"Looks for capitulation sell-volume followed by expanding up-day spot volume.",
-      "etf":"Consistency and magnitude of daily net ETF flows; missing feed is excluded.",
+      "etf":"Daily spot crypto ETF net flows aggregated across funds. Incomplete reporting days are excluded rather than treated as zero.",
       "cvd":flow_detail,
       "price":"Confirmed daily swing higher-low and higher-high structure."
     }
