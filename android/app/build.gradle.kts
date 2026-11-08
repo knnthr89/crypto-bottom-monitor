@@ -12,9 +12,13 @@ android {
         applicationId = "com.example.cryptobottommonitor"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
-        buildConfigField("String", "BASE_URL", "\"https://crypto-bottom-monitor-production.up.railway.app/\"")
+        versionCode = 2
+        versionName = "0.2.0"
+        val backendUrl = providers.gradleProperty("BACKEND_BASE_URL")
+            .orElse(providers.environmentVariable("BACKEND_BASE_URL"))
+            .getOrElse("http://10.0.2.2:8000/")
+            .let { if (it.endsWith("/")) it else "$it/" }
+        buildConfigField("String", "BASE_URL", "\"$backendUrl\"")
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -23,9 +27,7 @@ android {
     buildFeatures { compose = true; buildConfig = true }
 }
 kotlin {
-    compilerOptions {
-        jvmTarget.set(JvmTarget.JVM_17)
-    }
+    compilerOptions { jvmTarget.set(JvmTarget.JVM_17) }
 }
 dependencies {
     implementation("androidx.core:core-ktx:1.15.0")

@@ -1,5 +1,5 @@
 import os, requests
-from datetime import datetime, timezone
+import pandas as pd
 
 BINANCE="https://data-api.binance.vision"
 COINGECKO="https://api.coingecko.com/api/v3"
@@ -8,7 +8,6 @@ def binance_daily(symbol, limit=365):
     r=requests.get(f"{BINANCE}/api/v3/klines",params={"symbol":symbol,"interval":"1d","limit":limit},timeout=20)
     r.raise_for_status()
     rows=r.json()
-    import pandas as pd
     return pd.DataFrame([{"time":int(x[0]),"open":float(x[1]),"high":float(x[2]),"low":float(x[3]),
         "close":float(x[4]),"volume":float(x[5]),"quote_volume":float(x[7]),
         "taker_buy_quote":float(x[10])} for x in rows])
@@ -21,28 +20,32 @@ def coingecko_market_chart(coin_id, days=365):
     r.raise_for_status()
     return r.json()
 
-def coinglass_spot_cvd_result(symbol, interval="h4"):
-    """Return (data, reason). reason explains why data is empty, else None."""
+def coinglass_spot_cvd_result(symbol, interval="4h"):
+    """Return (data, reason); missing plan access triggers the Binance proxy."""
     key=os.getenv("COINGLASS_API_KEY")
-    if not key: return None, "COINGLASS_API_KEY is not set in the backend environment"
+    if not key:
+        return None,"COINGLASS_API_KEY is not set in the backend environment"
     try:
         r=requests.get("https://open-api-v4.coinglass.com/api/spot/cvd/history",
-            params={"symbol":symbol,"interval":interval},
-            headers={"CG-API-KEY":key},timeout=25)
+            params={"exchange":"Binance","symbol":symbol,"interval":interval},
+            headers={"CG-API-KEY":key},timeout=20)
     except requests.RequestException as e:
-        return None, f"CoinGlass request failed: {type(e).__name__}"
-    try: payload=r.json()
-    except ValueError: payload={}
+        return None,f"CoinGlass request failed: {type(e).__name__}"
+    try:
+        payload=r.json()
+    except ValueError:
+        payload={}
     if r.status_code!=200:
-        return None, f"CoinGlass HTTP {r.status_code}: {str(payload.get('msg') or r.text)[:120]}"
+        return None,f"CoinGlass HTTP {r.status_code}: {str(payload.get('msg') or r.text)[:120]}"
     code=str(payload.get("code","0"))
     if code not in ("0","200"):
-        return None, f"CoinGlass error code {code}: {str(payload.get('msg',''))[:120]}"
+        return None,f"CoinGlass error code {code}: {str(payload.get('msg',''))[:120]}"
     data=payload.get("data") or []
-    if not data: return None, "CoinGlass returned no spot CVD data for this symbol"
-    return data, None
+    if not data:
+        return None,"CoinGlass returned no spot CVD data for this symbol"
+    return data,None
 
-def coinglass_spot_cvd(symbol, interval="h4"):
+def coinglass_spot_cvd(symbol, interval="4h"):
     return coinglass_spot_cvd_result(symbol, interval)[0]
 
 def google_trends_weekly(keyword, geo=""):
@@ -56,9 +59,9 @@ def google_trends_weekly(keyword, geo=""):
         return None
 
 def etf_flows_from_csv(asset):
-    import pandas as pd
     path=os.getenv("ETF_FLOWS_CSV","./data/etf_flows.csv")
-    if not os.path.exists(path): return None
+    if not os.path.exists(path):
+        return None
     df=pd.read_csv(path)
     df=df[df.asset.str.upper()==asset]
     return df.sort_values("date").net_flow_usd.tolist() if len(df) else None

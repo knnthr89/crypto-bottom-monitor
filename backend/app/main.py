@@ -6,46 +6,73 @@ from .store import init, save_row
 from .validation import run_validation
 from .providers import binance_daily, google_trends_weekly, etf_flows_from_csv, coinglass_spot_cvd_result
 from .indicators import trends_score, volume_score, etf_score, cvd_score, price_structure_score
-import pandas as pd
 
-app=FastAPI(title="Crypto Bottom Confirmation Monitor",version="0.1.0")
+app=FastAPI(title="Crypto Bottom Confirmation Monitor",version="0.2.0")
 ASSETS={"BTC":("Bitcoin","BTCUSDT","bitcoin"),"ETH":("Ethereum","ETHUSDT","ethereum"),"SOL":("Solana","SOLUSDT","solana")}
+
 @app.on_event("startup")
-def startup(): init()
+def startup():
+    init()
 
 def build_snapshot(asset):
     name,pair,coin=ASSETS[asset]
     caveats=[]
     try:
         candles=binance_daily(pair,limit=180)
+        if candles.empty:
+            raise RuntimeError("Binance returned no daily candles")
         price=float(candles.close.iloc[-1])
         vol=volume_score(candles)
         ps=price_structure_score(candles)
-        # Spot CVD is separate from futures CVD; do not silently substitute.
+
+        # Prefer CoinGlass spot CVD when the subscribed plan exposes it.
         raw_cvd,cvd_reason=coinglass_spot_cvd_result(pair)
         cvd=None
+        flow_label="Spot CVD"
+        flow_detail="Spot cumulative volume delta from CoinGlass; exchange/pair coverage depends on subscription."
         if raw_cvd:
-            cvd=cvd_score([float(x.get("cum_vol_delta",0)) for x in raw_cvd])
+            values=[]
+            for point in raw_cvd:
+                value=point.get("cum_vol_delta")
+                if value is None:
+                    value=point.get("cvd")
+                if value is not None:
+                    values.append(float(value))
+            cvd=cvd_score(values) if values else None
+
+        # Binance klines expose taker-buy quote volume, so derive a clearly-labelled proxy.
+        if cvd is None:
+            daily_delta=(2*candles.taker_buy_quote-candles.quote_volume).fillna(0)
+            cvd=cvd_score(daily_delta.cumsum().tolist())
+            flow_label="Spot taker flow (proxy)"
+            flow_detail="Binance spot proxy: cumulative taker-buy quote volume minus estimated taker-sell quote volume. Not true aggregated CVD."
+            caveats.append("CoinGlass spot CVD unavailable; using Binance spot taker-buy/sell volume as a directional proxy, not true aggregated CVD.")
+
         trends=trends_score(google_trends_weekly(name))
         flows=etf_score(etf_flows_from_csv(asset))
-        if flows is None: caveats.append("ETF flow feed not configured or not available for this asset; indicator excluded, not treated as zero.")
-        if cvd is None: caveats.append(f"Spot CVD unavailable: {cvd_reason or 'no usable data'}.")
-        if trends is None: caveats.append("Google Trends unavailable or throttled; indicator excluded.")
-        f=Features(trends,vol,flows,cvd,ps)
-        result=score_features(f)
+        if flows is None:
+            caveats.append("ETF flow feed not configured or unavailable for this asset; indicator excluded, not treated as zero.")
+        if trends is None:
+            caveats.append("Google Trends unavailable or throttled; indicator excluded.")
+        result=score_features(Features(trends,vol,flows,cvd,ps))
         mode="live_partial"
     except Exception as e:
-        price=None; result=score_features(Features()); trends=vol=flows=cvd=ps=None
+        price=None
+        result=score_features(Features())
+        trends=vol=flows=cvd=ps=None
+        flow_label="Spot taker flow"
+        flow_detail="Spot directional flow unavailable."
         caveats.append(f"Provider error: {type(e).__name__}.")
         mode="unavailable"
+
     maxima={"trends":10,"volume":20,"etf":20,"cvd":20,"price":30}
-    labels={"trends":"Google Trends","volume":"Spot volume","etf":"ETF net flows","cvd":"Spot CVD","price":"Price structure"}
+    labels={"trends":"Google Trends","volume":"Spot volume","etf":"ETF net flows","cvd":flow_label,"price":"Price structure"}
     vals={"trends":trends,"volume":vol,"etf":flows,"cvd":cvd,"price":ps}
     details={
       "trends":"Weekly interest recovering from a low base; normalized 0–100 series.",
       "volume":"Looks for capitulation sell-volume followed by expanding up-day spot volume.",
       "etf":"Consistency and magnitude of daily net ETF flows; missing feed is excluded.",
-      "cvd":"Spot taker-buy minus taker-sell cumulative delta; exchange universe must stay consistent.",
+      "cvd":flow_detail,
       "price":"Confirmed daily swing higher-low and higher-high structure."
     }
     indicators=[]
@@ -57,30 +84,36 @@ def build_snapshot(asset):
       indicators=indicators,caveats=caveats)
 
 @app.get("/health")
-def health(): return {"status":"ok"}
+def health():
+    return {"status":"ok"}
+
 @app.get("/api/v1/assets",response_model=list[AssetSnapshot])
-def assets(): return [build_snapshot(a) for a in ASSETS]
+def assets():
+    return [build_snapshot(a) for a in ASSETS]
+
 @app.get("/api/v1/assets/{asset}",response_model=AssetSnapshot)
 def asset(asset:str):
     a=asset.upper()
-    if a not in ASSETS: raise HTTPException(404,"Supported assets: BTC, ETH, SOL")
+    if a not in ASSETS:
+        raise HTTPException(404,"Supported assets: BTC, ETH, SOL")
     return build_snapshot(a)
+
 @app.post("/api/v1/validation/run")
 def validation(payload:dict):
     a=str(payload.get("asset","BTC")).upper()
-    if a not in ASSETS: raise HTTPException(400,"Supported assets: BTC, ETH, SOL")
+    if a not in ASSETS:
+        raise HTTPException(400,"Supported assets: BTC, ETH, SOL")
     return run_validation(a)
 
 @app.post("/api/v1/validation/import")
 def import_history(payload:dict):
-    """Import pre-aligned, point-in-time daily feature rows for reproducible backtests.
-    Each row: date, close, trends, volume, etf, cvd, price_structure (each feature 0..1 or null).
-    Values must reflect only information available at that date.
-    """
+    """Import pre-aligned, point-in-time daily feature rows for reproducible backtests."""
     a=str(payload.get("asset","BTC")).upper()
-    if a not in ASSETS: raise HTTPException(400,"Supported assets: BTC, ETH, SOL")
+    if a not in ASSETS:
+        raise HTTPException(400,"Supported assets: BTC, ETH, SOL")
     data=payload.get("rows",[])
-    if not data: raise HTTPException(400,"rows is required")
+    if not data:
+        raise HTTPException(400,"rows is required")
     count=0
     for row in data:
         try:
