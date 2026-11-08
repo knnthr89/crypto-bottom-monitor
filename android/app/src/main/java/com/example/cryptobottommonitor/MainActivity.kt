@@ -16,8 +16,9 @@ import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.GET
 
 data class Indicator(val key:String, val label:String, val score:Double?, val maximum:Double, val status:String, val detail:String)
+data class Derivatives(val open_interest_usd:Double?, val open_interest_24h_change_pct:Double?, val open_interest_4h_history_change_pct:Double?, val funding_rate:Double?, val long_liquidations_24h_usd:Double?, val short_liquidations_24h_usd:Double?, val futures_volume_24h_usd:Double?, val oi_history_points:Int?, val pairs_count:Int?)
 data class Snapshot(val asset:String, val symbol:String, val price_usd:Double?, val score:Double?, val label:String,
-    val confirmed_bottom:Boolean, val data_mode:String, val as_of:String, val indicators:List<Indicator>, val caveats:List<String>)
+    val confirmed_bottom:Boolean, val data_mode:String, val as_of:String, val indicators:List<Indicator>, val caveats:List<String>, val derivatives:Derivatives?)
 interface Api { @GET("api/v1/assets") suspend fun assets():List<Snapshot> }
 class MainActivity:ComponentActivity() {
     override fun onCreate(savedInstanceState:Bundle?) { super.onCreate(savedInstanceState); setContent { MonitorScreen() } }
@@ -61,6 +62,17 @@ class MainActivity:ComponentActivity() {
                     }
                     LinearProgressIndicator(progress={ if(i.score==null) 0f else (i.score/i.maximum).toFloat() }, modifier=Modifier.fillMaxWidth())
                 }
+            }
+            s.derivatives?.let { d ->
+                HorizontalDivider()
+                Text("Futures derivatives (CoinGlass)", style=MaterialTheme.typography.titleSmall)
+                Text("Open interest: " + (d.open_interest_usd?.let { "$" + "%,.0f".format(it) } ?: "N/A"))
+                Text("OI 24h change: " + (d.open_interest_24h_change_pct?.let { "%.2f%%".format(it) } ?: "N/A"))
+                Text("Funding rate: " + (d.funding_rate?.let { "%.5f%%".format(it * 100) } ?: "N/A"))
+                Text("Long liquidations (24h): " + (d.long_liquidations_24h_usd?.let { "$" + "%,.0f".format(it) } ?: "N/A"))
+                Text("Short liquidations (24h): " + (d.short_liquidations_24h_usd?.let { "$" + "%,.0f".format(it) } ?: "N/A"))
+                Text("Futures volume (24h): " + (d.futures_volume_24h_usd?.let { "$" + "%,.0f".format(it) } ?: "N/A"))
+                Text("OI history change (4h samples): " + (d.open_interest_4h_history_change_pct?.let { "%.2f%%".format(it) } ?: "N/A"))
             }
             s.caveats.forEach { Text("• $it", style=MaterialTheme.typography.bodySmall) }
             Text("${s.data_mode} · ${s.as_of}", style=MaterialTheme.typography.labelSmall)
