@@ -4,7 +4,7 @@ from .models import AssetSnapshot, Indicator
 from .scoring import Features, score_features
 from .store import init, save_row
 from .validation import run_validation
-from .providers import binance_daily, google_trends_weekly, etf_flows_from_csv, coinglass_spot_cvd
+from .providers import binance_daily, google_trends_weekly, etf_flows_from_csv, coinglass_spot_cvd_result
 from .indicators import trends_score, volume_score, etf_score, cvd_score, price_structure_score
 import pandas as pd
 
@@ -22,14 +22,14 @@ def build_snapshot(asset):
         vol=volume_score(candles)
         ps=price_structure_score(candles)
         # Spot CVD is separate from futures CVD; do not silently substitute.
-        raw_cvd=coinglass_spot_cvd(pair)
+        raw_cvd,cvd_reason=coinglass_spot_cvd_result(pair)
         cvd=None
         if raw_cvd:
             cvd=cvd_score([float(x.get("cum_vol_delta",0)) for x in raw_cvd])
         trends=trends_score(google_trends_weekly(name))
         flows=etf_score(etf_flows_from_csv(asset))
         if flows is None: caveats.append("ETF flow feed not configured or not available for this asset; indicator excluded, not treated as zero.")
-        if cvd is None: caveats.append("Spot CVD unavailable; configure CoinGlass API access and validate pair coverage.")
+        if cvd is None: caveats.append(f"Spot CVD unavailable: {cvd_reason or 'no usable data'}.")
         if trends is None: caveats.append("Google Trends unavailable or throttled; indicator excluded.")
         f=Features(trends,vol,flows,cvd,ps)
         result=score_features(f)

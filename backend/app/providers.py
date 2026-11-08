@@ -21,15 +21,29 @@ def coingecko_market_chart(coin_id, days=365):
     r.raise_for_status()
     return r.json()
 
-def coinglass_spot_cvd(symbol, interval="h4"):
+def coinglass_spot_cvd_result(symbol, interval="h4"):
+    """Return (data, reason). reason explains why data is empty, else None."""
     key=os.getenv("COINGLASS_API_KEY")
-    if not key: return None
-    r=requests.get("https://open-api-v4.coinglass.com/api/spot/cvd/history",
-        params={"symbol":symbol,"interval":interval},
-        headers={"CG-API-KEY":key},timeout=25)
-    r.raise_for_status()
-    payload=r.json()
-    return payload.get("data",[])
+    if not key: return None, "COINGLASS_API_KEY is not set in the backend environment"
+    try:
+        r=requests.get("https://open-api-v4.coinglass.com/api/spot/cvd/history",
+            params={"symbol":symbol,"interval":interval},
+            headers={"CG-API-KEY":key},timeout=25)
+    except requests.RequestException as e:
+        return None, f"CoinGlass request failed: {type(e).__name__}"
+    try: payload=r.json()
+    except ValueError: payload={}
+    if r.status_code!=200:
+        return None, f"CoinGlass HTTP {r.status_code}: {str(payload.get('msg') or r.text)[:120]}"
+    code=str(payload.get("code","0"))
+    if code not in ("0","200"):
+        return None, f"CoinGlass error code {code}: {str(payload.get('msg',''))[:120]}"
+    data=payload.get("data") or []
+    if not data: return None, "CoinGlass returned no spot CVD data for this symbol"
+    return data, None
+
+def coinglass_spot_cvd(symbol, interval="h4"):
+    return coinglass_spot_cvd_result(symbol, interval)[0]
 
 def google_trends_weekly(keyword, geo=""):
     try:
