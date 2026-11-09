@@ -452,7 +452,7 @@ def run_btc_backtest(days=365, min_score=70.0, min_coverage=80.0, investment_usd
     records = history_rows("BTC", start_date=start_date)
 
     # Extra candles provide forward outcomes for signals near the start of the window.
-    candles = binance_daily("BTCUSDT", limit=min(1000, days + 100))
+    candles = binance_daily("BTCUSDT", limit=min(1000, days + 200))
     if candles is None or candles.empty:
         raise RuntimeError("Binance returned no daily candles for backtest")
 
