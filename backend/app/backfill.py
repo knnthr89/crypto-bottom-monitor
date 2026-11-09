@@ -110,7 +110,7 @@ def backfill_btc_history(days=365):
                 "price_volume": "Binance completed daily candles",
                 "cvd": "Binance spot taker-buy/sell volume proxy; not aggregated exchange CVD",
                 "trends": "Dated weekly Google Trends observations",
-                "etf": "Dated complete daily BTC ETF fund flows" if etf_value is not None else None,
+                "etf": "Dated aggregate daily BTC ETF net flows" if etf_value is not None else None,
             },
         }
         save_row("BTC", day, float(row["close"]), result, record)
@@ -129,8 +129,11 @@ def backfill_btc_history(days=365):
         "scores_over_70_with_at_least_80pct_coverage": scores_above_70,
         "coverage_summary": {
             "google_trends_weekly_observations": len(trend_records),
-            "complete_etf_flow_days": len(etf_records),
+            "available_etf_flow_days": len(etf_records),
+            "etf_first_date": etf_records[0]["date"] if etf_records else None,
+            "etf_last_date": etf_records[-1]["date"] if etf_records else None,
             "etf_provider_note": etf_reason,
+            "etf_history_note": "The CryptoETF API documents a 30-day history window on its free tier. Earlier dates remain without ETF data; a full 365-day ETF backfill requires a longer-history plan or another historical data source.",
             "cvd_note": "Historical Binance taker-flow proxy used; this is not true multi-exchange spot CVD.",
             "score_note": "Scores are point-in-time reconstructions from available historical inputs. Rows with less than 80% of the configured indicator weight are stored but excluded from the >70 candidate list.",
         },
