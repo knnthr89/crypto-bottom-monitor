@@ -145,7 +145,7 @@ def historical_scores(
     asset:str="BTC",
     days:int=Query(default=365,ge=1,le=365),
     min_score:float|None=None,
-    min_coverage:float=Query(default=0,ge=0,le=100),
+    min_coverage:float=Query(default=80,ge=0,le=100),
     confirmed_only:bool=False,
 ):
     """Retrieve stored historical scores; defaults to the last 365 days of BTC."""
