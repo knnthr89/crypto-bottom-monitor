@@ -73,6 +73,8 @@ def test_episode_analysis_compares_lump_sum_and_staged_buying(monkeypatch):
     assert "monthly_dca" in thirty_day
     assert thirty_day["weekly_dca"]["average_entry_price_usd"] >= 0
     assert result["methodology"]["episode_grouping"].startswith("Consecutive")
+    assert "harmonic mean" in result["methodology"]["dca_comparison"]
+    assert "calendar_windows" in result["calendar_dca_benchmark"]["30d"]["weekly_dca"]
 
 
 def test_btc_backtest_rejects_days_over_365():
@@ -82,3 +84,17 @@ def test_btc_backtest_rejects_days_over_365():
         assert "between 1 and 365" in str(exc)
     else:
         raise AssertionError("Expected invalid days to raise ValueError")
+
+
+
+def test_equal_dollar_dca_uses_harmonic_mean_purchase_cost():
+    candles = pd.DataFrame({
+        "date": ["2026-01-01", "2026-01-02", "2026-01-03", "2026-01-04"],
+        "close": [100.0, 200.0, 150.0, 180.0],
+        "low": [99.0, 198.0, 148.0, 178.0],
+    })
+
+    outcome = backtest._holding_outcome(candles, 0, 3, 1)
+    expected_cost = 3 / (1 / 100.0 + 1 / 200.0 + 1 / 150.0)
+
+    assert outcome["average_entry_price_usd"] == round(expected_cost, 2)
