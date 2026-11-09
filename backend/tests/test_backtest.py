@@ -76,6 +76,16 @@ def test_episode_analysis_compares_lump_sum_and_staged_buying(monkeypatch):
     assert "harmonic mean" in result["methodology"]["dca_comparison"]
     assert "calendar_windows" in result["calendar_dca_benchmark"]["30d"]["weekly_dca"]
 
+    matched = result["matched_investment_analysis"]["75"]
+    assert matched["investment_budget_usd_per_episode"] == 1000.0
+    matched_episode = matched["episodes"][0]
+    signal_entry = matched_episode["horizons"]["30d"]["signal_entry"]
+    weekly_dca = matched_episode["horizons"]["30d"]["weekly_dca"]
+    assert signal_entry["budget_usd"] == weekly_dca["budget_usd"] == 1000.0
+    assert signal_entry["exit_date"] == weekly_dca["exit_date"]
+    assert signal_entry["btc_acquired"] > 0
+    assert "final_value_usd" in weekly_dca
+
 
 def test_btc_backtest_rejects_days_over_365():
     try:
@@ -98,3 +108,42 @@ def test_equal_dollar_dca_uses_harmonic_mean_purchase_cost():
     expected_cost = 3 / (1 / 100.0 + 1 / 200.0 + 1 / 150.0)
 
     assert outcome["average_entry_price_usd"] == round(expected_cost, 2)
+
+
+
+def test_equal_dollar_investment_tracks_btc_and_final_value():
+    candles = pd.DataFrame({
+        "date": ["2026-01-01", "2026-01-02", "2026-01-03", "2026-01-04"],
+        "close": [100.0, 200.0, 150.0, 180.0],
+        "low": [99.0, 198.0, 148.0, 178.0],
+    })
+
+    outcome = backtest._equal_dollar_investment(
+        candles, entry_index=0, horizon=3, budget_usd=900, interval_days=1
+    )
+
+    # Three $300 purchases acquire 3 + 1.5 + 2 BTC.
+    assert outcome["installments"] == 3
+    assert outcome["btc_acquired"] == 6.5
+    assert outcome["average_entry_price_usd"] == round(900 / 6.5, 2)
+    assert outcome["final_value_usd"] == 1170.0
+    assert outcome["profit_loss_usd"] == 270.0
+    assert outcome["return_pct"] == 30.0
+
+
+def test_matched_strategies_use_same_start_and_budget():
+    candles = pd.DataFrame({
+        "date": ["2026-01-01", "2026-01-02", "2026-01-03", "2026-01-04",
+                 "2026-01-05", "2026-01-06", "2026-01-07", "2026-01-08"],
+        "close": [100.0, 110.0, 120.0, 130.0, 140.0, 150.0, 160.0, 170.0],
+        "low": [99.0, 109.0, 119.0, 129.0, 139.0, 149.0, 159.0, 169.0],
+    })
+
+    lump_sum = backtest._equal_dollar_investment(candles, 0, 7, 1000)
+    weekly = backtest._equal_dollar_investment(candles, 0, 7, 1000, 7)
+
+    assert lump_sum["budget_usd"] == weekly["budget_usd"]
+    assert lump_sum["exit_date"] == weekly["exit_date"]
+    assert lump_sum["exit_price_usd"] == weekly["exit_price_usd"]
+    assert lump_sum["purchase_days_after_signal"] == [0]
+    assert weekly["purchase_days_after_signal"] == [0]
