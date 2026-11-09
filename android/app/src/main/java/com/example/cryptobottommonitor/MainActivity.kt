@@ -18,6 +18,11 @@ import retrofit2.http.GET
 import java.util.Locale
 
 data class Indicator(val key:String, val label:String, val score:Double?, val maximum:Double, val status:String, val detail:String)
+data class MarketRegime(
+    val status:String,
+    val moving_average_200d_usd:Double?,
+    val distance_from_200d_pct:Double?
+)
 data class Derivatives(
     val open_interest_usd:Double?,
     val open_interest_24h_change_pct:Double?,
@@ -34,7 +39,8 @@ data class Derivatives(
 data class Snapshot(
     val asset:String, val symbol:String, val price_usd:Double?, val score:Double?, val label:String,
     val confirmed_bottom:Boolean, val data_mode:String, val as_of:String,
-    val indicators:List<Indicator>, val caveats:List<String>, val derivatives:Derivatives?
+    val indicators:List<Indicator>, val caveats:List<String>, val derivatives:Derivatives?,
+    val market_regime:MarketRegime? = null
 )
 interface Api { @GET("api/v1/assets") suspend fun assets():List<Snapshot> }
 
@@ -92,6 +98,36 @@ class MainActivity:ComponentActivity() {
     }
 }
 
+
+@Composable
+private fun MarketRegimePanel(regime: MarketRegime) {
+    val label = when (regime.status) {
+        "above_200d" -> "Above 200-day average"
+        "below_200d" -> "Below 200-day average"
+        "at_200d" -> "At 200-day average"
+        else -> "200-day average unavailable"
+    }
+    Column(verticalArrangement=Arrangement.spacedBy(4.dp)) {
+        HorizontalDivider()
+        Text("Market trend", style=MaterialTheme.typography.titleMedium)
+        Text(label, style=MaterialTheme.typography.bodyLarge)
+        Text(
+            regime.moving_average_200d_usd?.let { "200-day average: $" + "%,.2f".format(Locale.US, it) } ?: "200-day average: N/A",
+            style=MaterialTheme.typography.bodyMedium
+        )
+        Text(
+            regime.distance_from_200d_pct?.let { "%+.2f".format(Locale.US, it) + "% versus the 200-day average" } ?: "Not enough daily price history",
+            style=MaterialTheme.typography.bodySmall,
+            color=MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            "Above the average means the longer-term trend is stronger; below means it is weaker. This is context, not a buy signal.",
+            style=MaterialTheme.typography.bodySmall,
+            color=MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
 @Composable fun AssetCard(s:Snapshot) {
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement=Arrangement.spacedBy(8.dp)) {
@@ -102,6 +138,7 @@ class MainActivity:ComponentActivity() {
             Text(s.price_usd?.let { "$${"%,.2f".format(Locale.US, it)}" } ?: "Price unavailable")
             AssistChip(onClick={},label={Text(s.label.replace('_',' ').uppercase())})
             if(s.confirmed_bottom) Text("CONFIRMATION CONDITIONS MET", color=MaterialTheme.colorScheme.primary)
+            s.market_regime?.let { MarketRegimePanel(it) }
             s.indicators.forEach { i ->
                 Column(verticalArrangement=Arrangement.spacedBy(2.dp)) {
                     Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween) {
