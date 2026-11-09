@@ -118,7 +118,7 @@ def _holding_outcome(candles, entry_index, horizon, purchase_interval=None):
     }
 
 
-def _calendar_dca_benchmark(candles):
+def _calendar_dca_benchmark(candles, start_date=None):
     """Evaluate fixed-calendar weekly/monthly DCA, independent of score signals.
 
     Start windows are sampled every 7 or 30 completed candles from the first
@@ -127,8 +127,12 @@ def _calendar_dca_benchmark(candles):
     result = {}
     for horizon in HORIZONS:
         strategies = {"weekly_dca": [], "monthly_dca": []}
+        first_index = 0
+        if start_date is not None:
+            eligible_indices = candles.index[candles["date"] >= start_date].tolist()
+            first_index = eligible_indices[0] if eligible_indices else len(candles)
         for interval, name in ((7, "weekly_dca"), (30, "monthly_dca")):
-            for entry_index in range(0, max(0, len(candles) - horizon), interval):
+            for entry_index in range(first_index, max(first_index, len(candles) - horizon), interval):
                 outcome = _holding_outcome(candles, entry_index, horizon, interval)
                 if outcome is not None:
                     strategies[name].append(outcome)
@@ -389,7 +393,7 @@ def run_btc_backtest(days=365, min_score=70.0, min_coverage=80.0, investment_usd
         "horizon_summaries": summaries,
         "signals": signal_rows,
         "threshold_and_episode_analysis": episode_analysis,
-        "calendar_dca_benchmark": _calendar_dca_benchmark(candles),
+        "calendar_dca_benchmark": _calendar_dca_benchmark(candles, start_date),
         "full_period_investment_benchmark": full_period_benchmark(
             candles, start_date, float(investment_usd)
         ),
