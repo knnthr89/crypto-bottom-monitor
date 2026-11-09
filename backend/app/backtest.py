@@ -4,6 +4,7 @@ import pandas as pd
 
 from .providers import binance_daily
 from .store import history_rows
+from .benchmarks import full_period_benchmark
 
 
 HORIZONS = (7, 30, 60, 90, 180, 365)
@@ -389,6 +390,9 @@ def run_btc_backtest(days=365, min_score=70.0, min_coverage=80.0, investment_usd
         "signals": signal_rows,
         "threshold_and_episode_analysis": episode_analysis,
         "calendar_dca_benchmark": _calendar_dca_benchmark(candles),
+        "full_period_investment_benchmark": full_period_benchmark(
+            candles, start_date, float(investment_usd)
+        ),
         "matched_investment_analysis": matched_investment_analysis,
         "methodology": {
             "entry": "Signal-date completed daily candle close; episode analysis enters on the first qualifying day of each consecutive signal cluster.",
@@ -399,11 +403,14 @@ def run_btc_backtest(days=365, min_score=70.0, min_coverage=80.0, investment_usd
             "calendar_dca_benchmark": "Weekly and monthly calendar-DCA windows begin every 7 or 30 completed candles, respectively, from the first available candle, regardless of score. Windows overlap and are not independent; compare these broad baseline results cautiously with the smaller signal-episode samples.",
             "matched_investment_analysis": "For each qualifying signal episode, signal-entry lump sum, weekly DCA, and monthly DCA all start on the exact same first signal date and invest the same total USD budget. BTC acquired is calculated from each equal-dollar installment; final value is marked at the same horizon exit close. Each episode is evaluated independently; budgets are not compounded across episodes.",
             "investment_budget": "Default is USD 1000 per strategy per episode; configurable with the investment_usd query parameter. This is a historical comparison, not a recommendation to invest that amount.",
-            "exit": "Close exactly 7, 30, 60 or 90 completed daily candles after entry.",
+            "exit": "Close exactly 7, 30, 60, 90, 180 or 365 completed daily candles after entry.",
+            "full_period_benchmark": "Buy-and-hold, weekly DCA and monthly DCA share the same total budget and requested-period dates. Uninvested DCA cash is included in portfolio equity; drawdown is measured from daily marked-to-market equity.",
             "max_drawdown": "Lowest daily candle low during the forward holding window, measured against the strategy's average entry price.",
             "thresholds": "Episode analysis is calculated separately for score thresholds greater than 60, 65, 70, 75 and 80, using the requested minimum coverage.",
             "limitations": [
                 "Historical scores are reconstructed from available data and may not represent what was known in real time.",
+                "ETF history may cover only a small portion of the two-year window; missing ETF observations are not treated as zero.",
+                "Threshold performance only covers dates with stored historical score rows; the full-period price benchmark can cover the complete requested period.",
                 "The threshold and episode summaries count episodes, not consecutive signal days; the small number of episodes still limits statistical confidence.",
                 "Weekly and monthly DCA start on each episode's first signal date, so this tests lump-sum versus staged buying after the same signal, not DCA versus a market-wide calendar schedule.",
                 "Returns exclude fees, spreads, slippage and taxes.",
