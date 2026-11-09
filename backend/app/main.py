@@ -1,11 +1,12 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from datetime import datetime, timezone
 from .models import AssetSnapshot, Indicator
 from .scoring import Features, score_features
-from .store import init, save_row
+from .store import init, save_row, history_rows
 from .validation import run_validation
 from .providers import binance_daily, google_trends_weekly, etf_flows_result, coinglass_spot_cvd_result, coinglass_derivatives_result
 from .indicators import trends_score, volume_score, etf_score, cvd_score, price_structure_score
+from .backfill import backfill_btc_history
 
 app=FastAPI(title="Crypto Bottom Confirmation Monitor",version="0.2.0")
 ASSETS={"BTC":("Bitcoin","BTCUSDT","bitcoin"),"ETH":("Ethereum","ETHUSDT","ethereum"),"SOL":("Solana","SOLUSDT","solana")}
@@ -125,6 +126,56 @@ def asset(asset:str):
     if a not in ASSETS:
         raise HTTPException(404,"Supported assets: BTC, ETH, SOL")
     return build_snapshot(a)
+
+
+@app.post("/api/v1/history/backfill")
+def historical_backfill(payload:dict):
+    """Reconstruct and persist up to 365 days of BTC-only point-in-time scores."""
+    try:
+        days=int(payload.get("days",365))
+        return backfill_btc_history(days=days)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(400,str(exc))
+    except Exception as exc:
+        raise HTTPException(502,f"Historical backfill failed: {type(exc).__name__}: {str(exc)[:180]}")
+
+
+@app.get("/api/v1/history")
+def historical_scores(
+    asset:str="BTC",
+    days:int=Query(default=365,ge=1,le=365),
+    min_score:float|None=None,
+    min_coverage:float=Query(default=0,ge=0,le=100),
+    confirmed_only:bool=False,
+):
+    """Retrieve stored historical scores; defaults to the last 365 days of BTC."""
+    a=asset.upper()
+    if a!="BTC":
+        raise HTTPException(400,"Historical backfill currently supports BTC only")
+    from datetime import timedelta
+    start=(datetime.now(timezone.utc).date()-timedelta(days=days)).isoformat()
+    records=history_rows(a,start_date=start)
+    filtered=[]
+    for item in records:
+        details=item.get("details") or {}
+        coverage=float(details.get("coverage_pct",details.get("available_weight",0)) or 0)
+        if min_score is not None and (item.get("score") is None or item["score"]<min_score):
+            continue
+        if coverage<min_coverage:
+            continue
+        if confirmed_only and not item.get("confirmed_bottom"):
+            continue
+        filtered.append(item)
+    return {
+        "asset":a,
+        "days":days,
+        "start_date":start,
+        "records":len(filtered),
+        "scores_over_70":sum(1 for item in filtered if item.get("score") is not None and item["score"]>70),
+        "confirmed_bottom_days":sum(1 for item in filtered if item.get("confirmed_bottom")),
+        "history":filtered,
+        "note":"Only previously backfilled/imported records are returned. Scores are historical reconstructions, not live readings."
+    }
 
 @app.post("/api/v1/validation/run")
 def validation(payload:dict):
