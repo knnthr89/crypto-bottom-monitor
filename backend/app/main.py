@@ -211,6 +211,7 @@ def historical_btc_backtest(
     days:int=Query(default=365,ge=1,le=365),
     min_score:float=70.0,
     min_coverage:float=Query(default=80,ge=0,le=100),
+    investment_usd:float=Query(default=1000,gt=0,le=1000000),
 ):
     """Evaluate BTC historical score signals against subsequent daily price action."""
     try:
@@ -218,6 +219,7 @@ def historical_btc_backtest(
             days=days,
             min_score=min_score,
             min_coverage=min_coverage,
+            investment_usd=investment_usd,
         )
     except (TypeError, ValueError) as exc:
         raise HTTPException(400,str(exc))
