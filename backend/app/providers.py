@@ -311,7 +311,7 @@ def google_trends_weekly_dated(keyword, geo=""):
     try:
         from pytrends.request import TrendReq
         client = TrendReq(hl="en-US", tz=0)
-        client.build_payload([keyword], timeframe="today 12-m", geo=geo)
+        client.build_payload([keyword], timeframe="today 5-y", geo=geo)
         df = client.interest_over_time()
         if keyword not in df:
             return None

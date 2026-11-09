@@ -131,9 +131,9 @@ def asset(asset:str):
 
 @app.post("/api/v1/history/backfill")
 def historical_backfill(payload:dict):
-    """Reconstruct and persist up to 365 days of BTC-only point-in-time scores."""
+    """Reconstruct and persist up to 730 days of BTC-only historical scores."""
     try:
-        days=int(payload.get("days",365))
+        days=int(payload.get("days",730))
         return backfill_btc_history(days=days)
     except (TypeError, ValueError) as exc:
         raise HTTPException(400,str(exc))
@@ -144,12 +144,12 @@ def historical_backfill(payload:dict):
 @app.get("/api/v1/history")
 def historical_scores(
     asset:str="BTC",
-    days:int=Query(default=365,ge=1,le=365),
+    days:int=Query(default=730,ge=1,le=730),
     min_score:float|None=None,
     min_coverage:float=Query(default=80,ge=0,le=100),
     confirmed_only:bool=False,
 ):
-    """Retrieve stored historical scores; defaults to the last 365 days of BTC."""
+    """Retrieve stored historical scores; defaults to the last 730 days of BTC."""
     a=asset.upper()
     if a!="BTC":
         raise HTTPException(400,"Historical backfill currently supports BTC only")
@@ -208,7 +208,7 @@ def import_history(payload:dict):
 
 @app.get("/api/v1/backtest/btc")
 def historical_btc_backtest(
-    days:int=Query(default=365,ge=1,le=365),
+    days:int=Query(default=730,ge=1,le=730),
     min_score:float=70.0,
     min_coverage:float=Query(default=80,ge=0,le=100),
     investment_usd:float=Query(default=1000,gt=0,le=1000000),

@@ -87,11 +87,11 @@ def test_episode_analysis_compares_lump_sum_and_staged_buying(monkeypatch):
     assert "final_value_usd" in weekly_dca
 
 
-def test_btc_backtest_rejects_days_over_365():
+def test_btc_backtest_rejects_days_over_730():
     try:
-        backtest.run_btc_backtest(days=366)
+        backtest.run_btc_backtest(days=731)
     except ValueError as exc:
-        assert "between 1 and 365" in str(exc)
+        assert "between 1 and 730" in str(exc)
     else:
         raise AssertionError("Expected invalid days to raise ValueError")
 
@@ -147,3 +147,25 @@ def test_matched_strategies_use_same_start_and_budget():
     assert lump_sum["exit_price_usd"] == weekly["exit_price_usd"]
     assert lump_sum["purchase_days_after_signal"] == [0]
     assert weekly["purchase_days_after_signal"] == [0]
+
+
+
+def test_full_period_benchmark_compares_equal_budget_and_tracks_portfolio_drawdown():
+    from app.benchmarks import full_period_benchmark
+
+    candles = pd.DataFrame({
+        "date": ["2024-01-01", "2024-01-02", "2024-01-03", "2024-01-04",
+                 "2024-01-05", "2024-01-06", "2024-01-07", "2024-01-08"],
+        "close": [100.0, 90.0, 80.0, 85.0, 95.0, 105.0, 110.0, 120.0],
+    })
+    result = full_period_benchmark(candles, "2024-01-01", 1000.0)
+
+    assert result["available"] is True
+    strategies = result["strategies"]
+    assert strategies["buy_and_hold"]["budget_usd"] == 1000.0
+    assert strategies["weekly_dca"]["budget_usd"] == 1000.0
+    assert strategies["monthly_dca"]["budget_usd"] == 1000.0
+    assert strategies["buy_and_hold"]["purchase_count"] == 1
+    assert strategies["weekly_dca"]["purchase_count"] == 2
+    assert strategies["monthly_dca"]["purchase_count"] == 1
+    assert "max_portfolio_drawdown_pct" in strategies["weekly_dca"]
