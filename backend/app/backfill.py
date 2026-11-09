@@ -19,8 +19,8 @@ def backfill_btc_history(days=365):
     ETF observations are aligned by their publication dates. Missing inputs remain
     None; they are never backfilled with today's value or treated as zero.
     """
-    if not isinstance(days, int) or days < 1 or days > 365:
-        raise ValueError("days must be an integer between 1 and 365")
+    if not isinstance(days, int) or days < 1 or days > 730:
+        raise ValueError("days must be an integer between 1 and 730")
 
     # Fetch extra candles for rolling indicator warm-up before the requested window.
     candles = binance_daily("BTCUSDT", limit=min(1000, days + 100))
