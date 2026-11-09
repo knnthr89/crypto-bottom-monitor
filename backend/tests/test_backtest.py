@@ -177,7 +177,7 @@ def test_entry_timing_comparison_compares_signal_and_delayed_entries(monkeypatch
     dates = [(today - timedelta(days=499 - i)).isoformat() for i in range(499)]
     candles = _candles_for_dates(dates)
     signals = [{
-        "date": dates[10],
+        "date": dates[110],
         "score": 78.0,
         "details": {"coverage_pct": 100.0},
     }]
