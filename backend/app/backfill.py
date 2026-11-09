@@ -48,7 +48,6 @@ def backfill_btc_history(days=365):
     etf_values = []
     saved = []
     scores_above_70 = []
-    missing_sources = set()
     daily_taker_delta = (
         2 * candles["taker_buy_quote"].astype(float)
         - candles["quote_volume"].astype(float)
@@ -127,7 +126,7 @@ def backfill_btc_history(days=365):
         "start_date": start_date,
         "end_date": candles.iloc[-1]["date"],
         "stored_days": len(saved),
-        "scores_over_70_with_at_least_70pct_coverage": scores_above_70,
+        "scores_over_70_with_at_least_80pct_coverage": scores_above_70,
         "coverage_summary": {
             "google_trends_weekly_observations": len(trend_records),
             "complete_etf_flow_days": len(etf_records),
