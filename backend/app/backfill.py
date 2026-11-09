@@ -94,9 +94,9 @@ def backfill_btc_history(days=365):
             "price_structure": price_value,
         }
         coverage = float(result["available_weight"])
-        # The threshold is deliberately explicit: partial scores below 70% coverage
+        # The threshold is deliberately explicit: partial scores below 80% coverage
         # are stored for inspection but not counted as reliable >70 candidates.
-        eligible = coverage >= 70.0
+        eligible = coverage >= 80.0
         record = {
             "date": day,
             "close": float(row["close"]),
@@ -133,6 +133,6 @@ def backfill_btc_history(days=365):
             "complete_etf_flow_days": len(etf_records),
             "etf_provider_note": etf_reason,
             "cvd_note": "Historical Binance taker-flow proxy used; this is not true multi-exchange spot CVD.",
-            "score_note": "Scores are point-in-time reconstructions from available historical inputs. Rows with less than 70% of the configured indicator weight are stored but excluded from the >70 candidate list.",
+            "score_note": "Scores are point-in-time reconstructions from available historical inputs. Rows with less than 80% of the configured indicator weight are stored but excluded from the >70 candidate list.",
         },
     }
