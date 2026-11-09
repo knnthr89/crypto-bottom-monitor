@@ -285,3 +285,68 @@ def coinglass_derivatives_result(asset):
         return result, None
     except (requests.RequestException, ValueError, TypeError, RuntimeError) as exc:
         return None, f"CoinGlass derivatives unavailable: {str(exc)[:140]}"
+
+
+def google_trends_weekly_dated(keyword, geo=""):
+    """Return dated weekly Google Trends observations for point-in-time backfills."""
+    try:
+        from pytrends.request import TrendReq
+        client = TrendReq(hl="en-US", tz=0)
+        client.build_payload([keyword], timeframe="today 12-m", geo=geo)
+        df = client.interest_over_time()
+        if keyword not in df:
+            return None
+        return [
+            {"date": index.date().isoformat(), "value": float(value)}
+            for index, value in df[keyword].dropna().items()
+        ]
+    except Exception:
+        return None
+
+
+def etf_flow_records_result(asset):
+    """Return dated, complete CryptoETF daily flow records; never convert missing flows to zero."""
+    asset_slugs = {"BTC": "btc", "ETH": "eth", "SOL": "sol"}
+    asset = asset.upper()
+    slug = asset_slugs.get(asset)
+    if not slug:
+        return None, f"Unsupported ETF asset: {asset}"
+
+    key = os.getenv("CRYPTOETF_API_KEY") or os.getenv("CRYPTOETF_KEY")
+    if not key:
+        return None, "CryptoETF API key is not configured; no dated ETF history available"
+
+    try:
+        response = requests.get(
+            f"{CRYPTOETF_API}/flows/{slug}/funds",
+            headers={"Authorization": f"Bearer {key}"},
+            timeout=25
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except requests.RequestException as exc:
+        return None, f"CryptoETF request failed: {type(exc).__name__}"
+    except ValueError:
+        return None, "CryptoETF returned invalid JSON"
+
+    if isinstance(payload, dict) and isinstance(payload.get("data"), dict):
+        payload = payload["data"]
+    if not isinstance(payload, dict):
+        return None, "CryptoETF response did not contain dated flow data"
+
+    records = []
+    for day in payload.get("days") or []:
+        funds = day.get("funds") or []
+        values = [fund.get("netFlowUsdM") for fund in funds]
+        if not day.get("date") or not funds or any(value is None for value in values):
+            continue
+        try:
+            total_usd = sum(float(value) for value in values) * 1_000_000
+            records.append({"date": str(day["date"])[:10], "net_flow_usd": total_usd})
+        except (TypeError, ValueError):
+            continue
+
+    records.sort(key=lambda item: item["date"])
+    if not records:
+        return None, "CryptoETF returned no complete dated daily flow records"
+    return records, None
