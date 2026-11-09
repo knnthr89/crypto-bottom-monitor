@@ -99,7 +99,11 @@ def _holding_outcome(candles, entry_index, horizon, purchase_interval=None):
             float(candles.iloc[entry_index + day]["close"])
             for day in purchase_days
         ]
-        average_entry = sum(purchase_prices) / len(purchase_prices)
+        # Equal-dollar purchases buy different BTC quantities at different prices.
+        # The effective cost per BTC is therefore the harmonic mean.
+        if any(price <= 0 for price in purchase_prices):
+            return None
+        average_entry = len(purchase_prices) / sum(1.0 / price for price in purchase_prices)
 
     if average_entry <= 0:
         return None
@@ -111,6 +115,27 @@ def _holding_outcome(candles, entry_index, horizon, purchase_interval=None):
         "average_entry_price_usd": round(average_entry, 2),
         "purchase_days_after_signal": purchase_days,
     }
+
+
+def _calendar_dca_benchmark(candles):
+    """Evaluate fixed-calendar weekly/monthly DCA, independent of score signals.
+
+    Start windows are sampled every 7 or 30 completed candles from the first
+    available candle. Windows overlap, so observations are not independent.
+    """
+    result = {}
+    for horizon in HORIZONS:
+        strategies = {"weekly_dca": [], "monthly_dca": []}
+        for interval, name in ((7, "weekly_dca"), (30, "monthly_dca")):
+            for entry_index in range(0, max(0, len(candles) - horizon), interval):
+                outcome = _holding_outcome(candles, entry_index, horizon, interval)
+                if outcome is not None:
+                    strategies[name].append(outcome)
+        result[f"{horizon}d"] = {
+            name: _summarize(rows, count_label="calendar_windows")
+            for name, rows in strategies.items()
+        }
+    return result
 
 
 def _build_episode_analysis(records, candles, candle_by_date, min_coverage):
@@ -252,12 +277,14 @@ def run_btc_backtest(days=365, min_score=70.0, min_coverage=80.0):
         "horizon_summaries": summaries,
         "signals": signal_rows,
         "threshold_and_episode_analysis": episode_analysis,
+        "calendar_dca_benchmark": _calendar_dca_benchmark(candles),
         "methodology": {
             "entry": "Signal-date completed daily candle close; episode analysis enters on the first qualifying day of each consecutive signal cluster.",
             "episode_grouping": "Consecutive calendar days with qualifying scores are grouped as one episode.",
             "weekly_dca": "Equal purchases at the episode start and every 7 days after, up to but not including the exit day.",
             "monthly_dca": "Equal purchases at the episode start and every 30 days after, up to but not including the exit day.",
-            "dca_comparison": "DCA return is measured from the arithmetic average of purchase prices to the same horizon exit close. It is a staged-buy comparison, not a separate market-timing strategy.",
+            "dca_comparison": "Equal-dollar installments are evaluated using the harmonic mean purchase price (total BTC acquired is the sum of each installment divided by its price). Episode DCA begins on the first signal day; calendar DCA is a separate fixed schedule independent of score signals.",
+            "calendar_dca_benchmark": "Weekly and monthly calendar-DCA windows begin every 7 or 30 completed candles, respectively, from the first available candle, regardless of score. Windows overlap and are not independent; compare these broad baseline results cautiously with the smaller signal-episode samples.",
             "exit": "Close exactly 7, 30, 60 or 90 completed daily candles after entry.",
             "max_drawdown": "Lowest daily candle low during the forward holding window, measured against the strategy's average entry price.",
             "thresholds": "Episode analysis is calculated separately for score thresholds greater than 60, 65, 70, 75 and 80, using the requested minimum coverage.",
