@@ -138,6 +138,112 @@ def _calendar_dca_benchmark(candles):
     return result
 
 
+def _equal_dollar_investment(candles, entry_index, horizon, budget_usd, interval_days=None):
+    """Simulate a fixed USD budget invested once or in equal-dollar installments."""
+    end_index = entry_index + horizon
+    if end_index >= len(candles):
+        return None
+    future = candles.iloc[entry_index + 1:end_index + 1]
+    if len(future) != horizon:
+        return None
+
+    purchase_days = [0] if interval_days is None else list(range(0, horizon, interval_days))
+    prices = [float(candles.iloc[entry_index + day]["close"]) for day in purchase_days]
+    if not prices or any(price <= 0 for price in prices):
+        return None
+
+    installment_usd = float(budget_usd) / len(prices)
+    btc_acquired = sum(installment_usd / price for price in prices)
+    if btc_acquired <= 0:
+        return None
+
+    average_cost = float(budget_usd) / btc_acquired
+    exit_price = float(candles.iloc[end_index]["close"])
+    final_value = btc_acquired * exit_price
+    lowest_price = float(future["low"].min())
+    return {
+        "budget_usd": round(float(budget_usd), 2),
+        "installments": len(prices),
+        "installment_usd": round(installment_usd, 2),
+        "btc_acquired": round(btc_acquired, 8),
+        "average_entry_price_usd": round(average_cost, 2),
+        "exit_date": str(candles.iloc[end_index]["date"]),
+        "exit_price_usd": round(exit_price, 2),
+        "final_value_usd": round(final_value, 2),
+        "profit_loss_usd": round(final_value - float(budget_usd), 2),
+        "return_pct": (final_value / float(budget_usd) - 1) * 100,
+        "max_drawdown_pct": (lowest_price / average_cost - 1) * 100,
+        "purchase_days_after_signal": purchase_days,
+    }
+
+
+def _build_matched_investment_analysis(records, candles, candle_by_date, min_coverage, budget_usd):
+    """Compare lump-sum signal entry with weekly/monthly DCA from identical signal dates."""
+    analysis = {}
+    for threshold in THRESHOLDS:
+        qualifying = [
+            row for row in records
+            if row.get("score") is not None
+            and float(row["score"]) > threshold
+            and _coverage(row) >= min_coverage
+        ]
+        episodes = _group_episodes(qualifying, candle_by_date)
+        by_horizon = {
+            horizon: {"signal_entry": [], "weekly_dca": [], "monthly_dca": []}
+            for horizon in HORIZONS
+        }
+        episode_details = []
+
+        for episode in episodes:
+            item = {
+                "episode": episode["episode"],
+                "start_date": episode["start_date"],
+                "entry_score": episode["entry_score"],
+                "coverage_pct": episode["coverage_pct"],
+                "horizons": {},
+            }
+            for horizon in HORIZONS:
+                strategies = {
+                    "signal_entry": _equal_dollar_investment(
+                        candles, episode["entry_index"], horizon, budget_usd
+                    ),
+                    "weekly_dca": _equal_dollar_investment(
+                        candles, episode["entry_index"], horizon, budget_usd, 7
+                    ),
+                    "monthly_dca": _equal_dollar_investment(
+                        candles, episode["entry_index"], horizon, budget_usd, 30
+                    ),
+                }
+                if strategies["signal_entry"] is None:
+                    continue
+                item["horizons"][f"{horizon}d"] = {}
+                for name, outcome in strategies.items():
+                    if outcome is None:
+                        continue
+                    by_horizon[horizon][name].append(outcome)
+                    item["horizons"][f"{horizon}d"][name] = {
+                        key: value for key, value in outcome.items()
+                        if key != "purchase_days_after_signal"
+                    }
+            episode_details.append(item)
+
+        analysis[str(threshold)] = {
+            "score_rule": f"score > {threshold}",
+            "episodes_evaluated": len(episode_details),
+            "investment_budget_usd_per_episode": round(float(budget_usd), 2),
+            "comparison_basis": "All three strategies start on the exact same first qualifying date for each episode and invest the same total USD budget.",
+            "horizon_summaries": {
+                f"{horizon}d": {
+                    strategy: _summarize(rows, count_label="episodes")
+                    for strategy, rows in by_horizon[horizon].items()
+                }
+                for horizon in HORIZONS
+            },
+            "episodes": episode_details,
+        }
+    return analysis
+
+
 def _build_episode_analysis(records, candles, candle_by_date, min_coverage):
     analysis = {}
     for threshold in THRESHOLDS:
@@ -191,12 +297,14 @@ def _build_episode_analysis(records, candles, candle_by_date, min_coverage):
     return analysis
 
 
-def run_btc_backtest(days=365, min_score=70.0, min_coverage=80.0):
+def run_btc_backtest(days=365, min_score=70.0, min_coverage=80.0, investment_usd=1000.0):
     """Evaluate BTC score signals, grouped episodes, and staged-buy benchmarks."""
     if not isinstance(days, int) or days < 1 or days > 365:
         raise ValueError("days must be an integer between 1 and 365")
     if not 0 <= float(min_coverage) <= 100:
         raise ValueError("min_coverage must be between 0 and 100")
+    if not 0 < float(investment_usd) <= 1_000_000:
+        raise ValueError("investment_usd must be greater than 0 and at most 1000000")
 
     today = datetime.now(timezone.utc).date()
     start_date = (today - timedelta(days=days)).isoformat()
@@ -265,6 +373,9 @@ def run_btc_backtest(days=365, min_score=70.0, min_coverage=80.0):
     episode_analysis = _build_episode_analysis(
         records, candles, candle_by_date, float(min_coverage)
     )
+    matched_investment_analysis = _build_matched_investment_analysis(
+        records, candles, candle_by_date, float(min_coverage), float(investment_usd)
+    )
     return {
         "asset": "BTC",
         "start_date": start_date,
@@ -278,6 +389,7 @@ def run_btc_backtest(days=365, min_score=70.0, min_coverage=80.0):
         "signals": signal_rows,
         "threshold_and_episode_analysis": episode_analysis,
         "calendar_dca_benchmark": _calendar_dca_benchmark(candles),
+        "matched_investment_analysis": matched_investment_analysis,
         "methodology": {
             "entry": "Signal-date completed daily candle close; episode analysis enters on the first qualifying day of each consecutive signal cluster.",
             "episode_grouping": "Consecutive calendar days with qualifying scores are grouped as one episode.",
@@ -285,6 +397,8 @@ def run_btc_backtest(days=365, min_score=70.0, min_coverage=80.0):
             "monthly_dca": "Equal purchases at the episode start and every 30 days after, up to but not including the exit day.",
             "dca_comparison": "Equal-dollar installments are evaluated using the harmonic mean purchase price (total BTC acquired is the sum of each installment divided by its price). Episode DCA begins on the first signal day; calendar DCA is a separate fixed schedule independent of score signals.",
             "calendar_dca_benchmark": "Weekly and monthly calendar-DCA windows begin every 7 or 30 completed candles, respectively, from the first available candle, regardless of score. Windows overlap and are not independent; compare these broad baseline results cautiously with the smaller signal-episode samples.",
+            "matched_investment_analysis": "For each qualifying signal episode, signal-entry lump sum, weekly DCA, and monthly DCA all start on the exact same first signal date and invest the same total USD budget. BTC acquired is calculated from each equal-dollar installment; final value is marked at the same horizon exit close. Each episode is evaluated independently; budgets are not compounded across episodes.",
+            "investment_budget": "Default is USD 1000 per strategy per episode; configurable with the investment_usd query parameter. This is a historical comparison, not a recommendation to invest that amount.",
             "exit": "Close exactly 7, 30, 60 or 90 completed daily candles after entry.",
             "max_drawdown": "Lowest daily candle low during the forward holding window, measured against the strategy's average entry price.",
             "thresholds": "Episode analysis is calculated separately for score thresholds greater than 60, 65, 70, 75 and 80, using the requested minimum coverage.",
