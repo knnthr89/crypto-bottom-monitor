@@ -133,8 +133,8 @@ def backfill_btc_history(days=365):
             "etf_first_date": etf_records[0]["date"] if etf_records else None,
             "etf_last_date": etf_records[-1]["date"] if etf_records else None,
             "etf_provider_note": etf_reason,
-            "etf_history_note": "The CryptoETF API documents a 30-day history window on its free tier. Earlier dates remain without ETF data; a full 365-day ETF backfill requires a longer-history plan or another historical data source.",
+            "etf_history_note": "The CryptoETF API documents a 30-day history window on its free tier. Earlier dates remain without ETF data; a full two-year ETF backfill requires a longer-history plan or another historical data source.",
             "cvd_note": "Historical Binance taker-flow proxy used; this is not true multi-exchange spot CVD.",
-            "score_note": "Scores are point-in-time reconstructions from available historical inputs. Rows with less than 80% of the configured indicator weight are stored but excluded from the >70 candidate list.",
+            "score_note": "Scores are historical reconstructions from available inputs. Google Trends uses a five-year query window whose provider-normalized values can be influenced by the full query period, so this indicator is not guaranteed to be strictly point-in-time comparable. Rows with less than 80% of configured indicator weight are stored but excluded from reliable candidate analysis.",
         },
     }
