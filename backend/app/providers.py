@@ -83,7 +83,7 @@ def google_trends_weekly(keyword, geo=""):
     try:
         from pytrends.request import TrendReq
         client = TrendReq(hl="en-US", tz=0)
-        client.build_payload([keyword], timeframe="today 12-m", geo=geo)
+        client.build_payload([keyword], timeframe="today 5-y", geo=geo)
         df = client.interest_over_time()
         return df[keyword].tolist() if keyword in df else None
     except Exception:
