@@ -7,6 +7,7 @@ from .validation import run_validation
 from .providers import binance_daily, google_trends_weekly, etf_flows_result, coinglass_spot_cvd_result, coinglass_derivatives_result
 from .indicators import trends_score, volume_score, etf_score, cvd_score, price_structure_score
 from .backfill import backfill_btc_history
+from .backtest import run_btc_backtest
 
 app=FastAPI(title="Crypto Bottom Confirmation Monitor",version="0.2.0")
 ASSETS={"BTC":("Bitcoin","BTCUSDT","bitcoin"),"ETH":("Ethereum","ETHUSDT","ethereum"),"SOL":("Solana","SOLUSDT","solana")}
@@ -203,3 +204,22 @@ def import_history(payload:dict):
         except (KeyError,TypeError,ValueError) as exc:
             raise HTTPException(400,f"Invalid row: {exc}")
     return {"asset":a,"imported":count,"note":"Ensure each feature row is point-in-time and contains no future information."}
+
+
+@app.get("/api/v1/backtest/btc")
+def historical_btc_backtest(
+    days:int=Query(default=365,ge=1,le=365),
+    min_score:float=70.0,
+    min_coverage:float=Query(default=80,ge=0,le=100),
+):
+    """Evaluate BTC historical score signals against subsequent daily price action."""
+    try:
+        return run_btc_backtest(
+            days=days,
+            min_score=min_score,
+            min_coverage=min_coverage,
+        )
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(400,str(exc))
+    except Exception as exc:
+        raise HTTPException(502,f"Historical BTC backtest failed: {type(exc).__name__}: {str(exc)[:180]}")
