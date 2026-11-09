@@ -169,3 +169,27 @@ def test_full_period_benchmark_compares_equal_budget_and_tracks_portfolio_drawdo
     assert strategies["weekly_dca"]["purchase_count"] == 2
     assert strategies["monthly_dca"]["purchase_count"] == 1
     assert "max_portfolio_drawdown_pct" in strategies["weekly_dca"]
+
+
+
+def test_entry_timing_comparison_compares_signal_and_delayed_entries(monkeypatch):
+    today = datetime.now(timezone.utc).date()
+    dates = [(today - timedelta(days=499 - i)).isoformat() for i in range(499)]
+    candles = _candles_for_dates(dates)
+    signals = [{
+        "date": dates[10],
+        "score": 78.0,
+        "details": {"coverage_pct": 100.0},
+    }]
+    monkeypatch.setattr(backtest, "history_rows", lambda *args, **kwargs: signals)
+    monkeypatch.setattr(backtest, "binance_daily", lambda *args, **kwargs: candles)
+
+    result = backtest.run_btc_backtest(days=400)
+    timing = result["entry_timing_comparison"]["75"]
+    assert timing["signal_episodes"] == 1
+    assert timing["signal_days"] == 1
+    summary = timing["horizon_summaries"]["30d"]
+    assert summary["signal_day"]["observations"] == 1
+    assert summary["wait_7_days"]["observations"] == 1
+    assert summary["wait_30_days"]["observations"] == 1
+    assert summary["non_signal_calendar_days"]["observations"] > 1
