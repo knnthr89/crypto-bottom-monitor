@@ -12,7 +12,7 @@ from .scoring import Features, score_features
 from .store import save_row
 
 
-def backfill_btc_history(days=365):
+def backfill_btc_history(days=730):
     """Build point-in-time BTC daily scores from available historical provider data.
 
     Binance candles supply price, volume and a taker-flow proxy. Google Trends and
