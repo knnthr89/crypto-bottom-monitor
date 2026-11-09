@@ -138,64 +138,83 @@ def _complete_etf_flows(payload):
     complete.sort(key=lambda item: item["date"])
     return [item["net_flow_usd"] for item in complete]
 
-def etf_flows_result(asset):
-    """
-    Return (flows, reason).
-    Uses CryptoETF when an API key is configured.
-    Falls back to the legacy CSV when no API key is configured.
-    """
-    asset_slugs = {
-        "BTC": "btc",
-        "ETH": "eth",
-        "SOL": "sol"
-    }
-
+def _etf_daily_flow_records(asset):
+    """Fetch dated aggregate daily ETF flows; the API's free tier exposes 30 days."""
+    asset_slugs = {"BTC": "btc", "ETH": "eth", "SOL": "sol"}
     asset = asset.upper()
     slug = asset_slugs.get(asset)
-
     if not slug:
         return None, f"Unsupported ETF asset: {asset}"
 
     key = os.getenv("CRYPTOETF_API_KEY") or os.getenv("CRYPTOETF_KEY")
-
     if not key:
-        csv_flows = etf_flows_from_csv(asset)
-        if csv_flows:
-            return csv_flows, "Using legacy CSV ETF data; CryptoETF API key is not configured"
-        return None, "CRYPTOETF_API_KEY is not configured and no CSV ETF data is available"
+        return None, "CRYPTOETF_API_KEY is not configured"
 
     try:
-        r = requests.get(
-            f"{CRYPTOETF_API}/flows/{slug}/funds",
+        response = requests.get(
+            f"{CRYPTOETF_API}/flows/{slug}",
             headers={"Authorization": f"Bearer {key}"},
-            timeout=20
+            timeout=25
         )
-    except requests.RequestException as e:
-        return None, f"CryptoETF request failed: {type(e).__name__}"
-
-    if r.status_code == 401:
-        return None, "CryptoETF API rejected the key (HTTP 401)"
-
-    if r.status_code == 429:
-        return None, "CryptoETF rate limit reached (HTTP 429)"
-
-    if r.status_code != 200:
-        return None, f"CryptoETF API returned HTTP {r.status_code}"
-
-    try:
-        payload = r.json()
+        response.raise_for_status()
+        payload = response.json()
+    except requests.RequestException as exc:
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+        if status == 401:
+            return None, "CryptoETF API rejected the key (HTTP 401)"
+        if status == 429:
+            return None, "CryptoETF rate limit reached (HTTP 429)"
+        return None, f"CryptoETF request failed: {type(exc).__name__}"
     except ValueError:
         return None, "CryptoETF returned invalid JSON"
 
-    flows = _complete_etf_flows(payload)
+    if isinstance(payload, dict) and isinstance(payload.get("data"), dict):
+        payload = payload["data"]
+    if not isinstance(payload, dict):
+        return None, "CryptoETF response did not contain daily flow data"
 
-    if not flows:
-        return None, "CryptoETF returned no complete daily fund-flow data"
+    records = []
+    for day in payload.get("days") or []:
+        date = day.get("date")
+        value = day.get("netFlowUsdM")
+        if not date or value is None:
+            # Do not turn an unreported/null value into zero.
+            continue
+        try:
+            records.append({
+                "date": str(date)[:10],
+                "net_flow_usd": float(value) * 1_000_000
+            })
+        except (TypeError, ValueError):
+            continue
 
-    if len(flows) < 10:
-        return None, f"Only {len(flows)} complete ETF flow days available; at least 10 are required"
+    records.sort(key=lambda item: item["date"])
+    if not records:
+        return None, "CryptoETF returned no dated daily net-flow records"
+    return records, None
 
-    return flows, None
+
+def etf_flows_result(asset):
+    """
+    Return (flows, reason) for the live indicator.
+    Prefer the API's aggregate daily endpoint; fall back to the legacy CSV.
+    """
+    records, reason = _etf_daily_flow_records(asset)
+    if records:
+        flows = [item["net_flow_usd"] for item in records]
+        if len(flows) >= 10:
+            return flows, None
+        return None, f"Only {len(flows)} daily ETF flow observations available; at least 10 are required"
+
+    csv_flows = etf_flows_from_csv(asset.upper())
+    if csv_flows and len(csv_flows) >= 10:
+        return csv_flows, f"Using legacy CSV ETF data because the API was unavailable: {reason}"
+    return None, reason or "No ETF flow data is available"
+
+
+def etf_flow_records_result(asset):
+    """Return dated aggregate ETF net-flow records for point-in-time historical scoring."""
+    return _etf_daily_flow_records(asset)
 
 def coinglass_derivatives_result(asset):
     """Aggregate Hobbyist-compatible CoinGlass futures OI and pairs-market metrics."""
