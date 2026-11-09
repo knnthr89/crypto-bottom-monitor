@@ -10,10 +10,10 @@ HORIZONS = (7, 30, 60, 90)
 THRESHOLDS = (60, 65, 70, 75, 80)
 
 
-def _summarize(rows):
+def _summarize(rows, count_label="signals"):
     if not rows:
         return {
-            "episodes": 0,
+            count_label: 0,
             "win_rate_pct": None,
             "average_return_pct": None,
             "median_return_pct": None,
@@ -24,7 +24,7 @@ def _summarize(rows):
     returns = [item["return_pct"] for item in rows]
     drawdowns = [item["max_drawdown_pct"] for item in rows]
     return {
-        "episodes": len(rows),
+        count_label: len(rows),
         "win_rate_pct": round(sum(value > 0 for value in returns) / len(returns) * 100, 1),
         "average_return_pct": round(sum(returns) / len(returns), 2),
         "median_return_pct": round(float(pd.Series(returns).median()), 2),
@@ -156,7 +156,7 @@ def _build_episode_analysis(records, candles, candle_by_date, min_coverage):
             "signal_days": sum(item["signal_days"] for item in episodes),
             "horizon_summaries": {
                 f"{horizon}d": {
-                    strategy: _summarize(rows)
+                    strategy: _summarize(rows, count_label="episodes")
                     for strategy, rows in horizon_rows[horizon].items()
                 }
                 for horizon in HORIZONS
