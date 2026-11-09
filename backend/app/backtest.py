@@ -302,6 +302,75 @@ def _build_episode_analysis(records, candles, candle_by_date, min_coverage):
     return analysis
 
 
+
+def _build_entry_timing_comparison(records, candles, candle_by_date, min_coverage, start_date):
+    """Compare signal-day buying with delayed entries and non-signal calendar days.
+
+    Each strategy is measured for the same holding horizon starting on its own
+    purchase date. Calendar-day controls overlap and are not independent.
+    """
+    timing_horizons = (30, 90, 180, 365)
+    analysis = {}
+    for threshold in THRESHOLDS:
+        qualifying = [
+            row for row in records
+            if row.get("score") is not None
+            and float(row["score"]) > threshold
+            and _coverage(row) >= min_coverage
+        ]
+        episodes = _group_episodes(qualifying, candle_by_date)
+        qualifying_dates = {str(row["date"])[:10] for row in qualifying}
+        strategies = {
+            horizon: {
+                "signal_day": [],
+                "wait_7_days": [],
+                "wait_30_days": [],
+                "all_calendar_days": [],
+                "non_signal_calendar_days": [],
+            }
+            for horizon in timing_horizons
+        }
+
+        for episode in episodes:
+            for horizon in timing_horizons:
+                for delay, name in ((0, "signal_day"), (7, "wait_7_days"), (30, "wait_30_days")):
+                    outcome = _holding_outcome(candles, episode["entry_index"] + delay, horizon)
+                    if outcome is not None:
+                        strategies[horizon][name].append(outcome)
+
+        for entry_index, candle in candles.iterrows():
+            entry_date = str(candle["date"])
+            if entry_date < start_date:
+                continue
+            for horizon in timing_horizons:
+                outcome = _holding_outcome(candles, entry_index, horizon)
+                if outcome is None:
+                    continue
+                strategies[horizon]["all_calendar_days"].append(outcome)
+                if entry_date not in qualifying_dates:
+                    strategies[horizon]["non_signal_calendar_days"].append(outcome)
+
+        analysis[str(threshold)] = {
+            "score_rule": f"score > {threshold}",
+            "signal_episodes": len(episodes),
+            "signal_days": len(qualifying_dates),
+            "comparison_note": (
+                "Signal-day, 7-day-wait and 30-day-wait returns each use the same "
+                "holding horizon measured from their actual purchase date. Calendar "
+                "controls buy on every eligible day; non-signal controls exclude "
+                "qualifying signal dates. Daily control windows overlap and are not "
+                "independent observations."
+            ),
+            "horizon_summaries": {
+                f"{horizon}d": {
+                    strategy: _summarize(rows, count_label="observations")
+                    for strategy, rows in strategies[horizon].items()
+                }
+                for horizon in timing_horizons
+            },
+        }
+    return analysis
+
 def run_btc_backtest(days=365, min_score=70.0, min_coverage=80.0, investment_usd=1000.0):
     """Evaluate BTC score signals, grouped episodes, and staged-buy benchmarks."""
     if not isinstance(days, int) or days < 1 or days > 730:
@@ -381,6 +450,9 @@ def run_btc_backtest(days=365, min_score=70.0, min_coverage=80.0, investment_usd
     matched_investment_analysis = _build_matched_investment_analysis(
         records, candles, candle_by_date, float(min_coverage), float(investment_usd)
     )
+    entry_timing_comparison = _build_entry_timing_comparison(
+        records, candles, candle_by_date, float(min_coverage), start_date
+    )
     return {
         "asset": "BTC",
         "start_date": start_date,
@@ -398,7 +470,8 @@ def run_btc_backtest(days=365, min_score=70.0, min_coverage=80.0, investment_usd
             candles, start_date, float(investment_usd)
         ),
         "matched_investment_analysis": matched_investment_analysis,
-        "methodology": {
+
+        "entry_timing_comparison": entry_timing_comparison,        "methodology": {
             "entry": "Signal-date completed daily candle close; episode analysis enters on the first qualifying day of each consecutive signal cluster.",
             "episode_grouping": "Consecutive calendar days with qualifying scores are grouped as one episode.",
             "weekly_dca": "Equal purchases at the episode start and every 7 days after, up to but not including the exit day.",
@@ -406,6 +479,7 @@ def run_btc_backtest(days=365, min_score=70.0, min_coverage=80.0, investment_usd
             "dca_comparison": "Equal-dollar installments are evaluated using the harmonic mean purchase price (total BTC acquired is the sum of each installment divided by its price). Episode DCA begins on the first signal day; calendar DCA is a separate fixed schedule independent of score signals.",
             "calendar_dca_benchmark": "Weekly and monthly calendar-DCA windows begin every 7 or 30 completed candles, respectively, from the first available candle, regardless of score. Windows overlap and are not independent; compare these broad baseline results cautiously with the smaller signal-episode samples.",
             "matched_investment_analysis": "For each qualifying signal episode, signal-entry lump sum, weekly DCA, and monthly DCA all start on the exact same first signal date and invest the same total USD budget. BTC acquired is calculated from each equal-dollar installment; final value is marked at the same horizon exit close. Each episode is evaluated independently; budgets are not compounded across episodes.",
+            "entry_timing_comparison": "For each score threshold, compare buying on the first signal day with buying 7 or 30 days later; each return uses the same holding horizon measured from its actual purchase date. Also compare all eligible calendar-day entries and non-signal calendar-day entries. Calendar controls overlap and are not independent.",
             "investment_budget": "Default is USD 1000 per strategy per episode; configurable with the investment_usd query parameter. This is a historical comparison, not a recommendation to invest that amount.",
             "exit": "Close exactly 7, 30, 60, 90, 180 or 365 completed daily candles after entry.",
             "full_period_benchmark": "Buy-and-hold, weekly DCA and monthly DCA share the same total budget and requested-period dates. Uninvested DCA cash is included in portfolio equity; drawdown is measured from daily marked-to-market equity.",
