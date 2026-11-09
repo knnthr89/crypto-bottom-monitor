@@ -39,9 +39,9 @@ def test_btc_backtest_separates_partial_and_full_coverage(monkeypatch):
     result = backtest.run_btc_backtest(days=30)
 
     assert result["signals_found"] == 2
-    assert result["horizon_summaries"]["7d"]["partial_coverage_80_to_99_pct"]["episodes"] == 1
-    assert result["horizon_summaries"]["7d"]["full_coverage_100_pct"]["episodes"] == 1
-    assert result["horizon_summaries"]["7d"]["all_eligible_signals"]["episodes"] == 2
+    assert result["horizon_summaries"]["7d"]["partial_coverage_80_to_99_pct"]["signals"] == 1
+    assert result["horizon_summaries"]["7d"]["full_coverage_100_pct"]["signals"] == 1
+    assert result["horizon_summaries"]["7d"]["all_eligible_signals"]["signals"] == 2
     assert "7d" in result["signals"][0]["horizons"]
     assert result["signals"][0]["horizons"]["7d"]["max_drawdown_pct"] < 0
 
