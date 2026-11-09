@@ -371,6 +371,73 @@ def _build_entry_timing_comparison(records, candles, candle_by_date, min_coverag
         }
     return analysis
 
+
+
+def _with_200d_average(candles):
+    """Add a point-in-time 200-candle simple moving average to daily prices."""
+    result = candles.copy()
+    result["sma_200d"] = pd.to_numeric(result["close"], errors="coerce").rolling(
+        window=200, min_periods=200
+    ).mean()
+    return result
+
+
+def _market_regime_at(candles, entry_index):
+    row = candles.iloc[entry_index]
+    average = row.get("sma_200d")
+    if average is None or pd.isna(average):
+        return "unavailable"
+    close = float(row["close"])
+    average = float(average)
+    if close > average:
+        return "above_200d"
+    if close < average:
+        return "below_200d"
+    return "at_200d"
+
+
+def _build_market_regime_analysis(records, candles, candle_by_date, min_coverage):
+    """Measure signal-episode outcomes separately above and below the 200-day SMA."""
+    regimes = ("above_200d", "below_200d", "at_200d", "unavailable")
+    analysis = {}
+    for threshold in THRESHOLDS:
+        qualifying = [
+            row for row in records
+            if row.get("score") is not None
+            and float(row["score"]) > threshold
+            and _coverage(row) >= min_coverage
+        ]
+        episodes = _group_episodes(qualifying, candle_by_date)
+        rows = {horizon: {regime: [] for regime in regimes} for horizon in HORIZONS}
+        counts = {regime: 0 for regime in regimes}
+        for episode in episodes:
+            regime = _market_regime_at(candles, episode["entry_index"])
+            counts[regime] += 1
+            for horizon in HORIZONS:
+                outcome = _holding_outcome(candles, episode["entry_index"], horizon)
+                if outcome is not None:
+                    rows[horizon][regime].append(outcome)
+        analysis[str(threshold)] = {
+            "score_rule": f"score > {threshold}",
+            "signal_episodes": len(episodes),
+            "episode_counts_by_regime": counts,
+            "horizon_summaries": {
+                f"{horizon}d": {
+                    regime: _summarize(rows[horizon][regime], count_label="episodes")
+                    for regime in regimes
+                }
+                for horizon in HORIZONS
+            },
+            "note": (
+                "Regime is determined on the signal date using the close "
+                "versus its 200-day simple moving average. Only episodes with a "
+                "complete 200-candle history can be classified; small episode "
+                "counts limit confidence. This is a filter comparison, not a "
+                "standalone prediction."
+            ),
+        }
+    return analysis
+
 def run_btc_backtest(days=365, min_score=70.0, min_coverage=80.0, investment_usd=1000.0):
     """Evaluate BTC score signals, grouped episodes, and staged-buy benchmarks."""
     if not isinstance(days, int) or days < 1 or days > 730:
@@ -392,6 +459,7 @@ def run_btc_backtest(days=365, min_score=70.0, min_coverage=80.0, investment_usd
     candles = candles.copy()
     candles["date"] = pd.to_datetime(candles["time"], unit="ms", utc=True).dt.strftime("%Y-%m-%d")
     candles = candles[candles["date"] < today.isoformat()].sort_values("date").reset_index(drop=True)
+    candles = _with_200d_average(candles)
     candle_by_date = {row["date"]: index for index, row in candles.iterrows()}
 
     eligible = [
@@ -453,6 +521,9 @@ def run_btc_backtest(days=365, min_score=70.0, min_coverage=80.0, investment_usd
     entry_timing_comparison = _build_entry_timing_comparison(
         records, candles, candle_by_date, float(min_coverage), start_date
     )
+    market_regime_analysis = _build_market_regime_analysis(
+        records, candles, candle_by_date, float(min_coverage)
+    )
     return {
         "asset": "BTC",
         "start_date": start_date,
@@ -471,7 +542,8 @@ def run_btc_backtest(days=365, min_score=70.0, min_coverage=80.0, investment_usd
         ),
         "matched_investment_analysis": matched_investment_analysis,
 
-        "entry_timing_comparison": entry_timing_comparison,        "methodology": {
+        "entry_timing_comparison": entry_timing_comparison,
+        "market_regime_analysis": market_regime_analysis,        "methodology": {
             "entry": "Signal-date completed daily candle close; episode analysis enters on the first qualifying day of each consecutive signal cluster.",
             "episode_grouping": "Consecutive calendar days with qualifying scores are grouped as one episode.",
             "weekly_dca": "Equal purchases at the episode start and every 7 days after, up to but not including the exit day.",
@@ -479,6 +551,7 @@ def run_btc_backtest(days=365, min_score=70.0, min_coverage=80.0, investment_usd
             "dca_comparison": "Equal-dollar installments are evaluated using the harmonic mean purchase price (total BTC acquired is the sum of each installment divided by its price). Episode DCA begins on the first signal day; calendar DCA is a separate fixed schedule independent of score signals.",
             "calendar_dca_benchmark": "Weekly and monthly calendar-DCA windows begin every 7 or 30 completed candles, respectively, from the first available candle, regardless of score. Windows overlap and are not independent; compare these broad baseline results cautiously with the smaller signal-episode samples.",
             "matched_investment_analysis": "For each qualifying signal episode, signal-entry lump sum, weekly DCA, and monthly DCA all start on the exact same first signal date and invest the same total USD budget. BTC acquired is calculated from each equal-dollar installment; final value is marked at the same horizon exit close. Each episode is evaluated independently; budgets are not compounded across episodes.",
+            "market_regime_analysis": "For each score threshold, signal episodes are separated by whether the signal-date close is above or below its 200-day simple moving average. The average uses only the 200 daily closes available through that signal date.",
             "entry_timing_comparison": "For each score threshold, compare buying on the first signal day with buying 7 or 30 days later; each return uses the same holding horizon measured from its actual purchase date. Also compare all eligible calendar-day entries and non-signal calendar-day entries. Calendar controls overlap and are not independent.",
             "investment_budget": "Default is USD 1000 per strategy per episode; configurable with the investment_usd query parameter. This is a historical comparison, not a recommendation to invest that amount.",
             "exit": "Close exactly 7, 30, 60, 90, 180 or 365 completed daily candles after entry.",
