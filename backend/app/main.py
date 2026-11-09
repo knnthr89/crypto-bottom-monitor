@@ -144,7 +144,7 @@ def historical_backfill(payload:dict):
 @app.get("/api/v1/history")
 def historical_scores(
     asset:str="BTC",
-    days:int=Query(default=365,ge=1,le=365),
+    days:int=Query(default=730,ge=1,le=730),
     min_score:float|None=None,
     min_coverage:float=Query(default=80,ge=0,le=100),
     confirmed_only:bool=False,
@@ -208,7 +208,7 @@ def import_history(payload:dict):
 
 @app.get("/api/v1/backtest/btc")
 def historical_btc_backtest(
-    days:int=Query(default=365,ge=1,le=365),
+    days:int=Query(default=730,ge=1,le=730),
     min_score:float=70.0,
     min_coverage:float=Query(default=80,ge=0,le=100),
     investment_usd:float=Query(default=1000,gt=0,le=1000000),
