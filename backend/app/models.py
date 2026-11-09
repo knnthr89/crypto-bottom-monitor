@@ -21,3 +21,4 @@ class AssetSnapshot(BaseModel):
     indicators: List[Indicator]
     caveats: List[str]
     derivatives: Optional[Dict] = None
+    market_regime: Optional[Dict] = None
