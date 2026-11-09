@@ -193,3 +193,41 @@ def test_entry_timing_comparison_compares_signal_and_delayed_entries(monkeypatch
     assert summary["wait_7_days"]["observations"] == 1
     assert summary["wait_30_days"]["observations"] == 1
     assert summary["non_signal_calendar_days"]["observations"] > 1
+
+
+
+def test_200_day_average_and_regime_require_200_completed_candles():
+    candles = pd.DataFrame({
+        "date": [f"2025-01-{(i % 28) + 1:02d}" for i in range(250)],
+        "close": [100.0 + i for i in range(250)],
+        "low": [99.0 + i for i in range(250)],
+    })
+    enriched = backtest._with_200d_average(candles)
+
+    assert pd.isna(enriched.iloc[198]["sma_200d"])
+    assert enriched.iloc[199]["sma_200d"] == 199.5
+    assert backtest._market_regime_at(enriched, 198) == "unavailable"
+    assert backtest._market_regime_at(enriched, 249) == "above_200d"
+
+
+def test_market_regime_analysis_splits_signal_episodes_by_200_day_average():
+    candles = pd.DataFrame({
+        "date": [f"2025-{(i // 28) + 1:02d}-{(i % 28) + 1:02d}" for i in range(240)],
+        "close": [200.0 - i * 0.5 for i in range(240)],
+        "low": [199.0 - i * 0.5 for i in range(240)],
+    })
+    candles = backtest._with_200d_average(candles)
+    candle_by_date = {row["date"]: index for index, row in candles.iterrows()}
+    records = [{
+        "date": candles.iloc[220]["date"],
+        "score": 78.0,
+        "details": {"coverage_pct": 100.0},
+    }]
+    result = backtest._build_market_regime_analysis(
+        records, candles, candle_by_date, 80.0
+    )
+    threshold = result["75"]
+
+    assert threshold["signal_episodes"] == 1
+    assert sum(threshold["episode_counts_by_regime"].values()) == 1
+    assert threshold["episode_counts_by_regime"]["below_200d"] == 1
