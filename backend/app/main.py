@@ -19,11 +19,20 @@ def startup():
 def build_snapshot(asset):
     name,pair,coin=ASSETS[asset]
     caveats=[]
+    market_regime=None
     try:
-        candles=binance_daily(pair,limit=180)
+        candles=binance_daily(pair,limit=250)
         if candles.empty:
             raise RuntimeError("Binance returned no daily candles")
         price=float(candles.close.iloc[-1])
+        if len(candles) >= 200:
+            average_200d=float(candles.close.tail(200).mean())
+            distance_200d=(price / average_200d - 1) * 100 if average_200d else None
+            market_regime={
+                "status": "above_200d" if price > average_200d else "below_200d" if price < average_200d else "at_200d",
+                "moving_average_200d_usd": round(average_200d, 2),
+                "distance_from_200d_pct": round(distance_200d, 2) if distance_200d is not None else None,
+            }
         vol=volume_score(candles)
         ps=price_structure_score(candles)
 
@@ -111,7 +120,8 @@ def build_snapshot(asset):
           maximum=maxima[k],status="available" if v is not None else "missing",detail=details[k]))
     return AssetSnapshot(asset=asset,symbol=pair,price_usd=price,score=result["score"],label=result["label"],
       confirmed_bottom=result["confirmed_bottom"],data_mode=mode,as_of=datetime.now(timezone.utc).isoformat(),
-      indicators=indicators,caveats=caveats,derivatives=derivatives if mode != "unavailable" else None)
+      indicators=indicators,caveats=caveats,derivatives=derivatives if mode != "unavailable" else None,
+      market_regime=market_regime)
 
 @app.get("/health")
 def health():
