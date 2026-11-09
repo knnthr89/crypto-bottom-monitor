@@ -6,7 +6,7 @@ from .providers import binance_daily
 from .store import history_rows
 
 
-HORIZONS = (7, 30, 60, 90)
+HORIZONS = (7, 30, 60, 90, 180, 365)
 THRESHOLDS = (60, 65, 70, 75, 80)
 
 
@@ -299,8 +299,8 @@ def _build_episode_analysis(records, candles, candle_by_date, min_coverage):
 
 def run_btc_backtest(days=365, min_score=70.0, min_coverage=80.0, investment_usd=1000.0):
     """Evaluate BTC score signals, grouped episodes, and staged-buy benchmarks."""
-    if not isinstance(days, int) or days < 1 or days > 365:
-        raise ValueError("days must be an integer between 1 and 365")
+    if not isinstance(days, int) or days < 1 or days > 730:
+        raise ValueError("days must be an integer between 1 and 730")
     if not 0 <= float(min_coverage) <= 100:
         raise ValueError("min_coverage must be between 0 and 100")
     if not 0 < float(investment_usd) <= 1_000_000:
